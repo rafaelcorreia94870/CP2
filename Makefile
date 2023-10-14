@@ -1,20 +1,24 @@
 CC = g++
 SRC = src/
-CFLAGS = -Wall -pg -O3 -march=x86-64
+CFLAGS = -Wall -pg -O2 -ftree-vectorize -msse2 -mfpmath=sse -march=x86-64
 
 .DEFAULT_GOAL = MD.exe
 
 test:
 	$(CC) $(CFLAGS) $(SRC)MD.cpp -lm -o MD.exe
-	srun --partition=cpar perf stat -e L1-dcache-load-misses -M cpi ./MD.exe < inputdata.txt
+	srun --partition=cpar perf stat -M cpi ./MD.exe < inputdata.txt
 
 test2:
 	$(CC) $(CFLAGS) $(SRC)MD2.cpp -lm -o MD2.exe
-	srun --partition=cpar perf stat -e L1-dcache-load-misses -M cpi ./MD2.exe < inputdata.txt
+	srun --partition=cpar perf stat -M cpi ./MD2.exe < inputdata.txt
 
 test3:
 	$(CC) $(CFLAGS) $(SRC)MD3.cpp -lm -o MD3.exe
-	srun --partition=cpar perf stat -e L1-dcache-load-misses -M cpi ./MD3.exe < inputdata.txt
+	srun --partition=cpar perf stat -M cpi ./MD3.exe < inputdata.txt
+
+testrepeat:
+	$(CC) $(CFLAGS) $(SRC)MD3.cpp -lm -o MD3.exe
+	srun --partition=cpar perf stat -r 3 -M cpi ./MD3.exe < inputdata.txt
 
 gprof1:
 	$(CC) $(CFLAGS) $(SRC)MD.cpp -lm -o MD.exe

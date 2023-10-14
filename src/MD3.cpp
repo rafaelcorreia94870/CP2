@@ -92,7 +92,8 @@ int main()
     double dt, Vol, Temp, Press, Pavg, Tavg, rho;
     double VolFac, TempFac, PressFac, timefac;
     double KE, PE, mvs, gc, Z;
-    char trash[10000], prefix[1000], tfn[1000], ofn[1000], afn[1000];
+    //char trash[10000];
+    char prefix[1000], tfn[1000], ofn[1000], afn[1000];
     FILE *infp, *tfp, *ofp, *afp;
     
     
@@ -330,8 +331,8 @@ int main()
         Tavg += Temp;
         Pavg += Press;
         
-        fprintf(ofp,"  %15.15e  %15.15f  %15.15f %15.15f  %15.15f  %15.15f \n",i*dt*timefac,Temp,Press,KE, PE, KE+PE);
-        
+        fprintf(ofp,"  %12.12e  %12.12f  %12.12f %12.12f  %12.12f  %12.12f \n",i*dt*timefac,Temp,Press,KE, PE, KE+PE);
+       
         
     }
     
@@ -343,7 +344,7 @@ int main()
     gc = NA*Pavg*(Vol*VolFac)/(N*Tavg);
     fprintf(afp,"  Total Time (s)      T (K)               P (Pa)      PV/nT (J/(mol K))         Z           V (m^3)              N\n");
     fprintf(afp," --------------   -----------        ---------------   --------------   ---------------   ------------   -----------\n");
-    fprintf(afp,"  %15.15e  %15.15f       %15.15f     %15.15f       %15.15f        %15.15e         %i\n",i*dt*timefac,Tavg,Pavg,gc,Z,Vol*VolFac,N);
+    fprintf(afp,"  %12.12e  %12.12f       %12.12f     %12.12f       %12.12f        %12.12e         %i\n",i*dt*timefac,Tavg,Pavg,gc,Z,Vol*VolFac,N);
     
     printf("\n  TO ANIMATE YOUR SIMULATION, OPEN THE FILE \n  '%s' WITH VMD AFTER THE SIMULATION COMPLETES\n",tfn);
     printf("\n  TO ANALYZE INSTANTANEOUS DATA ABOUT YOUR MOLECULE, OPEN THE FILE \n  '%s' WITH YOUR FAVORITE TEXT EDITOR OR IMPORT THE DATA INTO EXCEL\n",ofn);
@@ -358,7 +359,7 @@ int main()
     
     
     
-    
+    free(RESULTS);
     fclose(tfp);
     fclose(ofp);
     fclose(afp);
@@ -418,45 +419,45 @@ void initialize() {
 //  Function to calculate the averaged velocity squared
 double MeanSquaredVelocity() { 
     
-    double vx2 = 0;
-    double vy2 = 0;
-    double vz2 = 0;
     double v2;
+    v2 = 0;
     
     for (int i=0; i<N; i++) {
-        
-        vx2 += v[i][0]*v[i][0];
-        vy2 += v[i][1]*v[i][1];
-        vz2 += v[i][2]*v[i][2];
-        
+        RESULTS[i] = v[i][0]*v[i][0] + v[i][1]*v[i][1] + v[i][2]*v[i][2];
     }
-    v2 = (vx2+vy2+vz2)/N;
+
+    for (int i=0; i<N; i++) {
+        v2+= RESULTS[i];
+    }
     
     
     //printf("  Average of x-component of velocity squared is %f\n",v2);
-    return v2;
+    return v2/N;
 }
 
 //  Function to calculate the kinetic energy of the system
 double Kinetic() { //Write Function here!  
     
-    double v2, kin;
+    double kin;
     
     kin =0.;
     for (int i=0; i<N; i++) {
+        for (int j=0; j<3; j++) { 
+            RESULTS[i*3+j] = v[i][j]*v[i][j];
+        }        
+    }
+    
+    for (int i=0; i<N; i++) {
         
-        v2 = 0.;
         for (int j=0; j<3; j++) {
             
-            v2 += v[i][j]*v[i][j];
+            kin += RESULTS[i*3+j];
             
-        }
-        kin += m*v2/2.;
-        
+        }        
     }
     
     //printf("  Total Kinetic Energy is %f\n",N*mvs*m/2.);
-    return kin;
+    return kin/2.;
     
 }
 
@@ -464,13 +465,8 @@ double Kinetic() { //Write Function here!
 // Function to calculate the potential energy of the system
 
 double Potential() {
-    double quot, r20,r21,r22, rsum, Pot,diff0,diff1,diff2;
-    int i, j, k;
-    for (i=0; i<N; i++) {
-        for (j=0; j<N; j++){
-            RESULTS[i*N+j]=0;
-        }
-    }
+    double r20,r21,r22, rsum, Pot,diff0,diff1,diff2,aux;
+    int i, j;
 
     for (i=0; i<N; i++) {
         for (j=i+1; j<N; j++) {
@@ -484,17 +480,18 @@ double Potential() {
             //Antes -> results[i*N+j]=4*epsilon*(term1 - term2); 
             //epsilon é sempre 1. e nunca é mudado no resto do codigo
             //pow é estupido 139s->72s
-            RESULTS[i*N+j]=4*((1-(rsum*rsum*rsum))/(rsum*rsum*rsum*rsum));
+            aux = rsum*rsum*rsum;
+            RESULTS[i*N+j]=((1-aux)/(aux*aux));
         }
     }
     Pot=0.;
 
     for (i=0; i<N; i++) {
-        for (j=0; j<N; j++){
+        for (j=i+1; j<N; j++){
             Pot+=RESULTS[i*N+j];
         }
     }
-    return Pot*2;
+    return Pot*8;
 }
 
 
@@ -533,7 +530,7 @@ double Potential() {
 
 void computeAccelerations() {
     int i, j, k;
-    double f, rSqd;
+    double f, rSqd,aux;
     double rij[3]; // position of i relative to j
     double rS0,rS1,rS2,auxrij;
     
@@ -555,7 +552,8 @@ void computeAccelerations() {
             rSqd = rS0+rS1+rS2;
             
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            f = 24 * (2 * (1/(rSqd*rSqd*rSqd*rSqd*rSqd*rSqd*rSqd)) - (1/(rSqd*rSqd*rSqd*rSqd)));
+            aux = rSqd*rSqd*rSqd;
+            f = 24 * ((2 - aux)/(aux*aux*rSqd));
             
             for (k = 0; k < 3; k++) {
                 //  from F = ma, where m = 1 in natural units!
