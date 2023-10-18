@@ -1,6 +1,6 @@
 CC = g++
 SRC = src/
-CFLAGS = -Wall -pg -O2 -ftree-vectorize -msse2 -mfpmath=sse -march=x86-64
+CFLAGS = -Wall -pg -O2 -ftree-vectorize -mavx -mfpmath=sse -march=x86-64
 
 .DEFAULT_GOAL = MD.exe
 
@@ -39,7 +39,7 @@ gprof3:
 	cat analysis3.txt
 
 clean:
-	find . -type f \( ! -path "./src/*" ! -name "Makefile" ! -name "inputdata.txt" \) -exec rm -v {} \;
+	find . -type f \( ! -path "./src/*" ! -name "Makefile" ! -name "inputdata.txt" ! -name "cp_output_original.txt" ! -name "cp_average_original.txt" \) -exec rm -v {} \;
 
 run:
 	./MD.exe < inputdata.txt
