@@ -38,6 +38,8 @@ double epsilon = 1.;
 double m = 1.;
 double kB = 1.;
 
+double PE;
+
 double NA = 6.022140857e23;
 double kBSI = 1.38064852e-23;  // m^2*kg/(s^2*K)
 
@@ -91,7 +93,7 @@ int main()
     int i;
     double dt, Vol, Temp, Press, Pavg, Tavg, rho;
     double VolFac, TempFac, PressFac, timefac;
-    double KE, PE, mvs, gc, Z;
+    double KE, mvs, gc, Z;
     //char trash[10000];
     char prefix[1000], tfn[1000], ofn[1000], afn[1000];
     FILE *infp, *tfp, *ofp, *afp;
@@ -317,7 +319,7 @@ int main()
         //  We would also like to use the IGL to try to see if we can extract the gas constant
         mvs = MeanSquaredVelocity();
         KE = Kinetic();
-        PE = Potential();
+       // PE = Potential();
         
         // Temperature from Kinetic Theory
         Temp = m*mvs/(3*kB) * TempFac;
@@ -463,12 +465,12 @@ double Kinetic() { //Write Function here!
 
 
 // Function to calculate the potential energy of the system
-
+/*
 double Potential() {
     double r20,r21,r22, rsum, Pot,diff0,diff1,diff2,aux;
     int i, j;
 
-    for (i=0; i<N; i++) {
+    for (i=0; i<N-1; i++) {
         for (j=i+1; j<N; j++) {
             diff0 = r[i][0]-r[j][0];
             diff1 = r[i][1]-r[j][1];
@@ -477,9 +479,11 @@ double Potential() {
             r21 = diff1*diff1;
             r22 = diff2*diff2;
             rsum=r20+r21+r22;
-            //Antes -> results[i*N+j]=4*epsilon*(term1 - term2); 
-            //epsilon é sempre 1. e nunca é mudado no resto do codigo
-            //pow é estupido 139s->72s
+
+            //Before -> results[i*N+j]=4*epsilon*(term1 - term2); 
+            //i removed epsilon since it is always 1. and it never changes value throughout the code
+            //evoking functions many times is bad, removing pow was the biggest performance boost
+            //we did some math to remove the square root and we used multiplications instead of calling the pow function
             aux = rsum*rsum*rsum;
             RESULTS[i*N+j]=((1-aux)/(aux*aux));
         }
@@ -491,44 +495,18 @@ double Potential() {
             Pot+=RESULTS[i*N+j];
         }
     }
+    //since we know we are working with 
+    //since all the results are multiplied by 4 in the start, we just multiply the final result by 4
+    // 4 * 2 = 8
     return Pot*8;
-}
-
-
-/*
-double Potential() {
-    double quot, r2, rnorm, term1, term2, Pot;
-    int i, j, k;
-    
-    Pot=0.;
-    for (i=0; i<N; i++) {
-        for (j=0; j<N; j++) {
-            
-            if (j!=i) {
-                r2=0.;
-                for (k=0; k<3; k++) {
-                    r2 += (r[i][k]-r[j][k])*(r[i][k]-r[j][k]);
-                }
-                rnorm=sqrt(r2);
-                quot=sigma/rnorm;
-                term1 = pow(quot,12.);
-                term2 = pow(quot,6.);
-                
-                Pot += 4*epsilon*(term1 - term2);
-                
-            }
-        }
-    }
-    
-    return Pot;
 }*/
-
 
 //   Uses the derivative of the Lennard-Jones potential to calculate
 //   the forces on each atom.  Then uses a = F/m to calculate the
 //   accelleration of each atom. 
 
 void computeAccelerations() {
+    double r20,r21,r22, rsum, Pot;
     int i, j, k;
     double f, rSqd,aux;
     double rij[3]; // position of i relative to j
@@ -550,19 +528,36 @@ void computeAccelerations() {
             rij[2]=r[i][2] - r[j][2];
             rS2 = rij[2]*rij[2];
             rSqd = rS0+rS1+rS2;
-            
-            //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
+
+            //Before -> results[i*N+j]=4*epsilon*(term1 - term2); 
+            //i removed epsilon since it is always 1. and it never changes value throughout the code
+            //evoking functions many times is bad, removing pow was the biggest performance boost
+            //we did some math to remove the square root and we used multiplications instead of calling the pow function
             aux = rSqd*rSqd*rSqd;
+            RESULTS[i*N+j]=((1-aux)/(aux*aux));
+            //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
             f = 24 * ((2 - aux)/(aux*aux*rSqd));
-            
             for (k = 0; k < 3; k++) {
                 //  from F = ma, where m = 1 in natural units!
                 auxrij= rij[k] * f;
                 a[i][k] += auxrij;
                 a[j][k] -= auxrij;
             }
+
+
         }
     }
+    Pot=0.;
+
+    for (i=0; i<N; i++) {
+        for (j=i+1; j<N; j++){
+            Pot+=RESULTS[i*N+j];
+        }
+    }
+     //since we know we are working with 
+    //since all the results are multiplied by 4 in the start, we just multiply the final result by 4
+    // 4 * 2 = 8
+    PE = Pot*8;
 }
 
 
