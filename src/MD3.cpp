@@ -33,10 +33,6 @@
 int N;
 
 //  Lennard-Jones parameters in natural units!
-double sigma = 1.;
-double epsilon = 1.;
-double m = 1.;
-double kB = 1.;
 
 double PE;
 double halfDT;
@@ -97,7 +93,7 @@ int main()
     double KE, mvs, gc, Z;
     //char trash[10000];
     char prefix[1000], tfn[1000], ofn[1000], afn[1000];
-    FILE *infp, *tfp, *ofp, *afp;
+    FILE *tfp, *ofp, *afp;
     
     
     printf("\n  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
@@ -331,7 +327,7 @@ int main()
        // PE = Potential();
         
         // Temperature from Kinetic Theory
-        Temp = m*mvs/(3*kB) * TempFac;
+        Temp = mvs/3 * TempFac;
         
         // Instantaneous gas constant and compressibility - not well defined because
         // pressure may be zero in some instances because there will be zero wall collisions,
@@ -514,10 +510,10 @@ double Potential() {
 void computeAccelerations() {
     double Pot;
     int i, j, k;
-    double f, rSqd,aux3,aux4;
+    double f, rSqd,rSqd3,rSqd6;
     int aux1,aux2;
     double rij[3]; // position of i relative to j
-    double rS0,rS1,rS2,auxrij;
+    double auxrij;
     Pot=0.;
 
 
@@ -532,22 +528,19 @@ void computeAccelerations() {
             aux1 = i*3;
             aux2 = j*3;
             rij[0]=r[aux1] - r[aux2];
-            rS0 = rij[0]*rij[0];
             rij[1]=r[aux1+1] - r[aux2+1];
-            rS1 = rij[1]*rij[1];
             rij[2]=r[aux1+2] - r[aux2+2];
-            rS2 = rij[2]*rij[2];
-            rSqd = rS0+rS1+rS2;
+            rSqd = rij[0]*rij[0]+rij[1]*rij[1]+rij[2]*rij[2];
 
             //Before -> results[i*N+j]=4*epsilon*(term1 - term2); 
             //i removed epsilon since it is always 1. and it never changes value throughout the code
             //evoking functions many times is bad, removing pow was the biggest performance boost
             //we did some math to remove the square root and we used multiplications instead of calling the pow function
-            aux3 = rSqd*rSqd*rSqd;
-            aux4=aux3*aux3;
-            Pot+=((1-aux3)/(aux4));
+            rSqd3 = rSqd*rSqd*rSqd;
+            rSqd6=rSqd3*rSqd3;
+            Pot+=((1-rSqd3)/(rSqd6));
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            f = 24 * ((2 - aux3)/(aux4*rSqd));
+            f = 24 * ((2 - rSqd3)/(rSqd6*rSqd));
             
             // vectorized
             for (k = 0; k < 3; k++) {
@@ -647,13 +640,13 @@ void initializeVelocities() {
     for (i=0; i<N; i++) {
         for (j=0; j<3; j++) { //vectorized
             
-            vCM[j] += m*v[i*3+j];
+            vCM[j] += v[i*3+j];
             
         }
     }
     
     
-    for (i=0; i<3; i++) vCM[i] /= N*m; //vectorized
+    for (i=0; i<3; i++) vCM[i] /= N; //vectorized
     
     //  Subtract out the center-of-mass velocity from the
     //  velocity of each particle... effectively set the
