@@ -18,7 +18,7 @@
  
  Electronic Contact:  foleyj10@wpunj.edu
  Mail Contact:   Prof. Jonathan Foley
- Department of Chemistry, William Paterson University
+ Department of Chemistry, foleyj10@wpunj.eduWilliam Paterson University
  300 Pompton Road
  Wayne NJ 07470
  
@@ -214,7 +214,7 @@ int main()
     
     scanf("%lf",&rho);
     
-    N = 10*216;
+    N = 2160;
     RESULTS = (double *) malloc(N*N*sizeof(double));
 
     Vol = N/(rho*NA);
@@ -508,14 +508,12 @@ double Potential() {
 //   accelleration of each atom. 
 
 void computeAccelerations() {
-    double Pot;
+    double Pot=0.;
     int i, j, k;
     double f, rSqd,rSqd3,rSqd6;
     int aux1,aux2;
     double rij[3]; // position of i relative to j
     double auxrij;
-    Pot=0.;
-
 
     //vectorized
     for (i = 0; i < N*3; i++) {  // set all accelerations to zero
@@ -523,9 +521,8 @@ void computeAccelerations() {
     }
 
     for (i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
+        aux1 = i*3;
         for (j = i+1; j < N; j++) {
-            // initialize r^2 to zero
-            aux1 = i*3;
             aux2 = j*3;
             rij[0]=r[aux1] - r[aux2];
             rij[1]=r[aux1+1] - r[aux2+1];
@@ -540,7 +537,7 @@ void computeAccelerations() {
             rSqd6=rSqd3*rSqd3;
             Pot+=((1-rSqd3)/(rSqd6));
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            f = 24 * ((2 - rSqd3)/(rSqd6*rSqd));
+            f = ((48 - 24*rSqd3)/(rSqd6*rSqd));
             
             // vectorized
             for (k = 0; k < 3; k++) {
