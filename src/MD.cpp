@@ -34,6 +34,7 @@ int N;
 
 //  Lennard-Jones parameters in natural units!
 
+
 double PE;
 double halfDT;
 double squareLDT;
@@ -71,13 +72,12 @@ void initialize();
 double VelocityVerlet(double dt, int iter, FILE *fp);  
 //  Compute Force using F = -dV/dr
 //  solve F = ma for use in Velocity Verlet
-void computeAccelerations();
+// and Compute total potential energy from particle coordinates
+void computeAccelerations_Potencial();
 //  Numerical Recipes function for generation gaussian distribution
 double gaussdist();
 //  Initialize velocities according to user-supplied initial Temperature (Tinit)
 void initializeVelocities();
-//  Compute total potential energy from particle coordinates
-double Potential();
 //  Compute mean squared velocity from particle velocities
 double MeanSquaredVelocity();
 //  Compute total kinetic energy from particle mass and velocities
@@ -278,7 +278,7 @@ int main()
     //  The accellerations of each particle will be defined from the forces and their
     //  mass, and this will allow us to update their positions via Newton's law
 
-    computeAccelerations(); 
+    computeAccelerations_Potencial(); 
   
     
     // Print number of particles to the trajectory file
@@ -312,6 +312,7 @@ int main()
         // This updates the positions and velocities using Newton's Laws
         // Also computes the Pressure as the sum of momentum changes from wall collisions / timestep
         // which is a Kinetic Theory of gasses concept of Pressure
+        // and computes de Potencial Energy of the particles
 
         Press = VelocityVerlet(dt, i+1, tfp);
 
@@ -320,7 +321,7 @@ int main()
         //  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         //  Now we would like to calculate somethings about the system:
         //  Instantaneous mean velocity squared, Temperature, Pressure
-        //  Potential, and Kinetic Energy
+        //   and Kinetic Energy
         //  We would also like to use the IGL to try to see if we can extract the gas constant
         mvs = MeanSquaredVelocity();
         KE = Kinetic();
@@ -467,48 +468,8 @@ double Kinetic() { //Write Function here!
 }
 
 
-// Function to calculate the potential energy of the system
-/*
-double Potential() {
-    double r20,r21,r22, rsum, Pot,diff0,diff1,diff2,aux;
-    int i, j;
 
-    for (i=0; i<N-1; i++) {
-        for (j=i+1; j<N; j++) {
-            diff0 = r[i][0]-r[j][0];
-            diff1 = r[i][1]-r[j][1];
-            diff2 = r[i][2]-r[j][2];
-            r20 = diff0*diff0;
-            r21 = diff1*diff1;
-            r22 = diff2*diff2;
-            rsum=r20+r21+r22;
-
-            //Before -> results[i*N+j]=4*epsilon*(term1 - term2); 
-            //i removed epsilon since it is always 1. and it never changes value throughout the code
-            //evoking functions many times is bad, removing pow was the biggest performance boost
-            //we did some math to remove the square root and we used multiplications instead of calling the pow function
-            aux = rsum*rsum*rsum;
-            RESULTS[i*N+j]=((1-aux)/(aux*aux));
-        }
-    }
-    Pot=0.;
-
-    for (i=0; i<N; i++) {
-        for (j=i+1; j<N; j++){
-            Pot+=RESULTS[i*N+j];
-        }
-    }
-    //since we know we are working with 
-    //since all the results are multiplied by 4 in the start, we just multiply the final result by 4
-    // 4 * 2 = 8
-    return Pot*8;
-}*/
-
-//   Uses the derivative of the Lennard-Jones potential to calculate
-//   the forces on each atom.  Then uses a = F/m to calculate the
-//   accelleration of each atom. 
-
-void computeAccelerations() {
+void computeAccelerations_Potencial() {
     double Pot=0.;
     int i, j, k;
     double f, rSqd,rSqd3,rSqd6;
@@ -530,7 +491,6 @@ void computeAccelerations() {
             rij[2]=r[aux1+2] - r[aux2+2];
             rSqd = rij[0]*rij[0]+rij[1]*rij[1]+rij[2]*rij[2];
 
-            //Before -> results[i*N+j]=4*epsilon*(term1 - term2); 
             //i removed epsilon since it is always 1. and it never changes value throughout the code
             //evoking functions many times is bad, removing pow was the biggest performance boost
             //we did some math to remove the square root and we used multiplications instead of calling the pow function
@@ -583,8 +543,8 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
         //printf("  %i  %6.4e   %6.4e   %6.4e\n",i,r[i][0],r[i][1],r[i][2]);
     }
 
-    //  Update accellerations from updated positions
-    computeAccelerations();
+    //  Update accellerations from updated positions amd calculate the potencial
+    computeAccelerations_Potencial();
 
     //  Update velocity with updated acceleration
     // vectorized
