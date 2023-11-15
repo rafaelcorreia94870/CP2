@@ -27,7 +27,6 @@
 #include<stdlib.h>
 #include<math.h>
 #include<string.h>
-#include<omp.h>
 
 
 // Number of particles
@@ -472,26 +471,20 @@ double Kinetic() { //Write Function here!
 
 void computeAccelerations_Potencial() {
     double Pot=0.;
-    int i;
-    
+    int i, j, k;
+    double f, rSqd,rSqd3,rSqd6;
+    int aux1,aux2;
+    double rij[3]; // position of i relative to j
+    double auxrij;
 
     //vectorized
-    #pragma omp parallel for
     for (i = 0; i < N*3; i++) {  // set all accelerations to zero
         a[i] = 0;
     }
-    
-    #pragma omp parallel for reduction(+:Pot)
+
     for (i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
-        
-        int j;
-        double auxx=0,auxy=0,auxz=0;
-        int aux1 = i*3;
+        aux1 = i*3;
         for (j = i+1; j < N; j++) {
-            double f, rSqd,rSqd3,rSqd6;
-            int aux2;  
-            double rij[3]; // position of i relative to j
-            double auxrij1,auxrij2,auxrij3;
             aux2 = j*3;
             rij[0]=r[aux1] - r[aux2];
             rij[1]=r[aux1+1] - r[aux2+1];
@@ -507,25 +500,14 @@ void computeAccelerations_Potencial() {
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
             f = ((48 - 24*rSqd3)/(rSqd6*rSqd));
             
-            auxrij1= rij[0] * f;
-            auxrij2= rij[1] * f;
-            auxrij3= rij[2] * f;
-            auxx+=auxrij1;
-            auxy+=auxrij2;
-            auxz+=auxrij3;
-            #pragma omp atomic
-            a[aux2] -= auxrij1;
-            #pragma omp atomic
-            a[aux2+1] -= auxrij2;
-            #pragma omp atomic
-            a[aux2+2] -= auxrij3;
+            // vectorized
+            for (k = 0; k < 3; k++) {
+                //  from F = ma, where m = 1 in natural units!
+                auxrij= rij[k] * f;
+                a[aux1+k] += auxrij;
+                a[aux2+k] -= auxrij;
+            }
         }
-        #pragma omp atomic
-        a[aux1] += auxx;
-        #pragma omp atomic
-        a[aux1+1] += auxy;
-        #pragma omp atomic
-        a[aux1+2] += auxz;
 
     }
 
@@ -550,6 +532,7 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
     //computeAccelerations();
     //  Update positions and velocity with current velocity and acceleration
     //printf("  Updated Positions!\n");
+
     for (i=0; i<N*3; i++) { //vectorized
             aux  = a[i]*halfDT;
             r[i] += (v[i]+aux)*dt;
