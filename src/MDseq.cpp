@@ -27,7 +27,6 @@
 #include<stdlib.h>
 #include<math.h>
 #include<string.h>
-#include<omp.h>
 
 
 // Number of particles
@@ -60,7 +59,6 @@ double* a= (double *) malloc(MAXPART*3*sizeof(double));
 //double* F=(double *) malloc(MAXPART*3*sizeof(double));
 
 double *RESULTS;
-double *AUXA;
 
 
 
@@ -81,10 +79,8 @@ void computeAccelerations_Potencial();
 double gaussdist();
 //  Initialize velocities according to user-supplied initial Temperature (Tinit)
 void initializeVelocities();
-//  Compute mean squared velocity from particle velocities
-double MeanSquaredVelocity();
-//  Compute total kinetic energy from particle mass and velocities
-double Kinetic();
+//  Compute squared velocity from particle velocities
+double SquareVelocity();
 
 int main()
 {
@@ -219,7 +215,6 @@ int main()
     
     N = 5000;
     RESULTS = (double *) malloc(N*N*sizeof(double));
-    AUXA = (double *) malloc(N*N*3*sizeof(double));
 
     Vol = N/(rho*NA);
     
@@ -327,8 +322,9 @@ int main()
         //  Instantaneous mean velocity squared, Temperature, Pressure
         //   and Kinetic Energy
         //  We would also like to use the IGL to try to see if we can extract the gas constant
-        mvs = MeanSquaredVelocity();
-        KE = Kinetic();
+        double v2 = SquareVelocity();
+        mvs = v2/N;
+        KE = v2/2.;
        // PE = Potential();
         
         // Temperature from Kinetic Theory
@@ -429,13 +425,8 @@ void initialize() {
     
 }   
 
-
-//  Function to calculate the averaged velocity squared
-double MeanSquaredVelocity() { 
-    
-    double v2;
-    v2 = 0;
-    //vectorized
+double SquareVelocity(){
+    double v2 = 0;
     for (int i=0; i<N*3; i++) {
         RESULTS[i] = v[i]*v[i];
     }
@@ -443,68 +434,31 @@ double MeanSquaredVelocity() {
     for (int i=0; i<N*3; i++) {
         v2+= RESULTS[i];
     }
+    return v2;
 
-    
-    
-    //printf("  Average of x-component of velocity squared is %f\n",v2/N);
-    return v2/N;
 }
-
-//  Function to calculate the kinetic energy of the system
-double Kinetic() { //Write Function here!  
-    
-    double kin;
-    
-    kin =0.;
-
-    //vectorized
-    for (int i=0; i<N*3; i++) {
-        RESULTS[i] = v[i]*v[i];              
-    }
-    
-    for (int i=0; i<N*3; i++) {
-       kin += RESULTS[i];  
-    }
-    
-    //printf("  Total Kinetic Energy is %f\n",N*mvs*m/2.);
-    return kin/2.;
-    
-}
-
 
 
 void computeAccelerations_Potencial() {
     double Pot=0.;
-    int i,j;
-    
+    int i;
     
 
     //vectorized
-    #pragma omp parallel for
     for (i = 0; i < N*3; i++) {  // set all accelerations to zero
         a[i] = 0;
     }
-
-    #pragma omp parallel for private(j)
-    for (i = 0; i < N; i++) {  
-        for (j=0; j<N*3; j++){
-            AUXA[i*N*3 + j] = 0;
-        }
-    }
-
-
     
-    #pragma omp parallel for reduction(+:Pot) private(j) schedule(dynamic,50)
     for (i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
-        double rij[3]; // position of i relative to j
-        double auxx,auxy,auxz;
-        int aux1=i*3,aux2;
-        double f, rSqd,rSqd3,rSqd6;
-        double auxrij1,auxrij2,auxrij3;
-        auxx=auxy=auxz=0;
+        
+        int j;
+        int aux1 = i*3;
         for (j = i+1; j < N; j++) {
+            double f, rSqd,rSqd3,rSqd6;
+            int aux2;  
+            double rij[3]; // position of i relative to j
+            double auxrij;
             aux2 = j*3;
-            
             rij[0]=r[aux1] - r[aux2];
             rij[1]=r[aux1+1] - r[aux2+1];
             rij[2]=r[aux1+2] - r[aux2+2];
@@ -519,35 +473,14 @@ void computeAccelerations_Potencial() {
             //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
             f = ((48 - 24*rSqd3)/(rSqd6*rSqd));
 
-
-            //Loop unroll
-            auxrij1= rij[0] * f;
-            auxrij2= rij[1] * f;
-            auxrij3= rij[2] * f;
-            auxx+=auxrij1;
-            auxy+=auxrij2;
-            auxz+=auxrij3;
-            //fazer transposta - talvez
-            AUXA[j*N*3 + i*3] = auxrij1;
-            AUXA[j*N*3 + i*3 +1] = auxrij2;
-            AUXA[j*N*3 + i*3 +2] = auxrij3;
+            for(int k=0;k<3;k++){
+                auxrij= rij[k] * f;
+                a[aux2 + k] -= auxrij;
+                a[aux1 + k] += auxrij;
+            }
+        
         }
-        //TO prevent accessing the same position multiple times in the loop
-        a[aux1] += auxx;
-        a[aux1+1] += auxy;
-        a[aux1+2] += auxz;
 
-    }
-    #pragma omp parallel for private(i)
-    for (j = 1; j < N; j++) {   // loop over all distinct pairs i,j
-        int aux1;
-        aux1= j*N*3;
-        for (i = 0; i < N; i++) {
-            a[j*3] -= AUXA[aux1 + i*3];
-            a[j*3 +1] -= AUXA[aux1 + i*3 +1];
-            a[j*3 +2] -= AUXA[aux1 + i*3 +2];
-
-        }
     }
 
      //since we know we are working with 
@@ -555,6 +488,7 @@ void computeAccelerations_Potencial() {
     // 4 * 2 = 8
     PE = Pot*8;
 }
+
 
 
 
@@ -604,15 +538,6 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
     }
     
     
-    /* removed, uncomment to save atoms positions */
-    /*for (i=0; i<N; i++) {
-        fprintf(fp,"%s",atype);
-        for (j=0; j<3; j++) {
-            fprintf(fp,"  %12.10e ",r[i][j]);
-        }
-        fprintf(fp,"\n");
-    }*/
-    //fprintf(fp,"\n \n");
     
     //return psum/(3*L*L*dt);
     return psum/squareLDT;
