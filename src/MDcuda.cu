@@ -24,6 +24,7 @@
  
  */
 #include "MDcuda.h"
+#include <cuda_runtime.h>
 
 #define NUM_BLOCKS 100
 #define NUM_THREADS_PER_BLOCK 50
@@ -218,7 +219,7 @@ int main()
     
     N = 5000;
     RESULTS = (double *) malloc(N*N*sizeof(double));
-    AUXA = (double *) malloc(3*N*N*sizeof(double));
+    AUXA = (double *) malloc(3*100*N*sizeof(double));
 
     Vol = N/(rho*NA);
     
@@ -442,6 +443,21 @@ double SquareVelocity(){
 
 }
 
+
+//NVIDIA CODE
+__device__ double atomicAddDouble(double* address, double val) {
+    unsigned long long int* address_as_ull = (unsigned long long int*)address;
+    unsigned long long int old = *address_as_ull, assumed;
+
+    do {
+        assumed = old;
+        old = atomicCAS(address_as_ull, assumed, __double_as_longlong(val + __longlong_as_double(assumed)));
+    } while (assumed != old);
+
+    return __longlong_as_double(old);
+}
+
+
 __global__ void calculateForces(double *r, double *a, double *Pot) {
     int bid = blockIdx.x;
     int tid = threadIdx.x;
@@ -449,40 +465,41 @@ __global__ void calculateForces(double *r, double *a, double *Pot) {
     double auxrij, rSqd, rSqd3, rSqd6,f;
     int aux1,aux2,j;
     double rij[3];
-    __shared__ float temp[NUM_THREADS_PER_BLOCK];
+    __shared__ double temp[NUM_THREADS_PER_BLOCK];
     temp[tid]=0;
+    a[i] = 0;
     aux1 = i * 3;
-    for (j = i + 1; j < 5000; j++) {
-    
-        aux2 = j * 3;
+    for (j = i+1; j < 5000; j++) {
+            aux2 = j * 3;
 
-        rij[0] = r[aux1] - r[aux2];
-        rij[1] = r[aux1 + 1] - r[aux2 + 1];
-        rij[2] = r[aux1 + 2] - r[aux2 + 2];
-        rSqd = rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2];
-        rSqd3 = rSqd * rSqd * rSqd;
-        rSqd6 = rSqd3 * rSqd3;
+            rij[0] = r[aux1] - r[aux2];
+            rij[1] = r[aux1 + 1] - r[aux2 + 1];
+            rij[2] = r[aux1 + 2] - r[aux2 + 2];
+            rSqd = rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2];
+            rSqd3 = rSqd * rSqd * rSqd;
+            rSqd6 = rSqd3 * rSqd3;
 
-        temp[tid] +=  (1 - rSqd3) / rSqd6;
+            temp[tid] +=  (1 - rSqd3) / rSqd6;
 
-        f = (48 - 24 * rSqd3) / (rSqd6 * rSqd);
-        for (int k = 0; k < 3; k++) {
-            auxrij = rij[k] * f;
-            //a[i] += auxrij;
-            //aux[j*5000*3 + i*3] = auxrij;
-
-        }
+            f = (48 - 24 * rSqd3) / (rSqd6 * rSqd);
+            for (int k = 0; k < 3; k++) {
+                auxrij = rij[k] * f;
+                //a[i*3 + k]+= auxrij;
+                //a[j*3 + k]-= auxrij;
+                atomicAddDouble(&a[i*3 + k], auxrij);
+                atomicAddDouble(&a[j*3 + k], -auxrij);
+            }
     }
-    __syncthreads();
 
+    __syncthreads();
     // Perform parallel reduction using an inverted tree
+
     for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
         if (tid < s && tid + s < blockDim.x) {
             temp[tid] += temp[tid + s];
         }
         __syncthreads();
     }
-
     // Store the result in the output array
     if (tid == 0) {
         Pot[bid] = temp[0];
@@ -494,32 +511,40 @@ __global__ void calculateForces(double *r, double *a, double *Pot) {
 
 
 void computeAccelerations_Potencial() {
+//    cudaEvent_t start, stop;
+//    float elapsedTime;
 
     double *d_r, *d_a, *d_Pot,*aux;
     int i;
     checkCUDAError("init");
 
-    cudaMallocManaged((void**)&d_r, sizeof(double) * N * 3);
-    cudaMallocManaged((void**)&d_a, sizeof(double) * N * 3);
-    cudaMallocManaged((void**)&d_Pot, sizeof(double) * 100);
-    //cudaMallocManaged((void**)&aux, sizeof(double) * N * N * 3);
+    cudaMalloc((void**)&d_r, sizeof(double) * N * 3);
+    cudaMalloc((void**)&d_a, sizeof(double) * N * 3);
+    cudaMalloc((void**)&d_Pot, sizeof(double) * 100);
     checkCUDAError("mem allocations");
 
     cudaMemcpy(d_r, r, sizeof(double) * N * 3, cudaMemcpyHostToDevice);
     cudaMemset(d_a, 0, sizeof(double) * N * 3);
-    cudaMemset(d_Pot, 0, sizeof(double) * 100);
+    //cudaMemset(d_Pot, 0, sizeof(double) * 100); //não é necessário pq ele já põe a zero
     //cudaMemset(aux, 0, sizeof(double) * N * N * 3);
     checkCUDAError("set memory");
 
-
+   // cudaEventCreate(&start);
+   // cudaEventCreate(&stop);
+   // cudaEventRecord(start, 0);
     calculateForces<<<NUM_THREADS_PER_BLOCK, NUM_BLOCKS>>>(d_r, d_a, d_Pot);
-    checkCUDAError("FORCRES");
 
+    checkCUDAError("FORCRES");
+   // cudaEventRecord(stop, 0);
+   // cudaEventSynchronize(stop);
+   // cudaEventElapsedTime(&elapsedTime, start, stop);
+  //  printf("Kernel Execution Time: %.2f ms\n", elapsedTime);
     // // Copy results back to host
     cudaMemcpy(a, d_a, sizeof(double) * N * 3, cudaMemcpyDeviceToHost);
+    checkCUDAError("memCPOY1");
+
     cudaMemcpy(RESULTS, d_Pot, sizeof(double) *100, cudaMemcpyDeviceToHost);
-    //cudaMemcpyAsync(AUXA, aux, sizeof(double)*3 *N *N, cudaMemcpyDeviceToHost);
-    checkCUDAError("memCPOY");
+    checkCUDAError("memCPOY2");
 
 
     // // Free device memory
@@ -527,7 +552,7 @@ void computeAccelerations_Potencial() {
     cudaFree(d_a);
     cudaFree(d_Pot);
     //cudaFree(aux);
-    checkCUDAError("FREEEE NELSON MANDELA");
+    checkCUDAError("FREEs");
 
 
 

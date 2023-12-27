@@ -4,7 +4,7 @@
 #include<string.h>
 #include <cstdlib>
 #include <iostream>
-#include <sys/time.h>
+#include <sys\timeb.h>
 #include <chrono>
 #include <cuda.h>
 
