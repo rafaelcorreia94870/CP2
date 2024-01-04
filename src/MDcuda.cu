@@ -26,8 +26,8 @@
 #include "MDcuda.h"
 #include <cuda_runtime.h>
 
-#define NUM_BLOCKS 100
-#define NUM_THREADS_PER_BLOCK 50
+#define NUM_BLOCKS 313
+#define NUM_THREADS_PER_BLOCK 16
 
 // Number of particles
 int N;
@@ -59,7 +59,7 @@ double* a= (double *) malloc(MAXPART*3*sizeof(double));
 //double* F=(double *) malloc(MAXPART*3*sizeof(double));
 
 double *RESULTS;
-double *AUXA;
+//double *AUXA;
 
 
 
@@ -219,7 +219,7 @@ int main()
     
     N = 5000;
     RESULTS = (double *) malloc(N*N*sizeof(double));
-    AUXA = (double *) malloc(3*100*N*sizeof(double));
+    //AUXA = (double *) malloc(3*100*N*sizeof(double));
 
     Vol = N/(rho*NA);
     
@@ -394,6 +394,8 @@ void initialize() {
     
     //  spacing between atoms along a given direction
     pos = L / n;
+
+
     
     //  index for number of particles assigned positions
     p = 0;
@@ -409,6 +411,8 @@ void initialize() {
             }
         }
     }
+
+    
     
     // Call function to initialize velocities
     initializeVelocities();
@@ -445,13 +449,19 @@ double SquareVelocity(){
 
 
 //NVIDIA CODE
-__device__ double atomicAddDouble(double* address, double val) {
-    unsigned long long int* address_as_ull = (unsigned long long int*)address;
+__device__ double atomicAddDouble(double* address, double val)
+{
+    unsigned long long int* address_as_ull =
+                              (unsigned long long int*)address;
     unsigned long long int old = *address_as_ull, assumed;
 
     do {
         assumed = old;
-        old = atomicCAS(address_as_ull, assumed, __double_as_longlong(val + __longlong_as_double(assumed)));
+        old = atomicCAS(address_as_ull, assumed,
+                        __double_as_longlong(val +
+                               __longlong_as_double(assumed)));
+
+    // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
     } while (assumed != old);
 
     return __longlong_as_double(old);
@@ -464,45 +474,65 @@ __global__ void calculateForces(double *r, double *a, double *Pot) {
     int i = bid* blockDim.x + tid;
     double auxrij, rSqd, rSqd3, rSqd6,f;
     int aux1,aux2,j;
-    double rij[3];
+    double rij[3],sumRIJ[3];
+    sumRIJ[0]=0.;
+    sumRIJ[1]=0.;
+    sumRIJ[2]=0.;
     __shared__ double temp[NUM_THREADS_PER_BLOCK];
     temp[tid]=0;
-    a[i] = 0;
+  //  if(tid<7) temp[tid+25]=0;
+    __shared__ double shareRk[NUM_THREADS_PER_BLOCK*3];
+
     aux1 = i * 3;
+    for (int k=0;k<3;++k){
+        shareRk[tid *3 +k] = r[aux1 +k];
+    }
+    //printf("%f", r[0]);
     for (j = i+1; j < 5000; j++) {
             aux2 = j * 3;
 
-            rij[0] = r[aux1] - r[aux2];
-            rij[1] = r[aux1 + 1] - r[aux2 + 1];
-            rij[2] = r[aux1 + 2] - r[aux2 + 2];
+            rij[0] = shareRk[tid *3 ] - r[aux2];
+            rij[1] = shareRk[tid *3 +1] - r[aux2 + 1];
+            rij[2] = shareRk[tid *3 +2] - r[aux2 + 2];
             rSqd = rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2];
             rSqd3 = rSqd * rSqd * rSqd;
             rSqd6 = rSqd3 * rSqd3;
 
-            temp[tid] +=  (1 - rSqd3) / rSqd6;
+            temp[tid]+= (1 - rSqd3) / rSqd6;
+            //ISTO É UMA MERDA atomicAddDouble(Pot,  (1 - rSqd3) / rSqd6);
+
 
             f = (48 - 24 * rSqd3) / (rSqd6 * rSqd);
             for (int k = 0; k < 3; k++) {
                 auxrij = rij[k] * f;
                 //a[i*3 + k]+= auxrij;
                 //a[j*3 + k]-= auxrij;
-                atomicAddDouble(&a[i*3 + k], auxrij);
-                atomicAddDouble(&a[j*3 + k], -auxrij);
+                sumRIJ[k]+=auxrij;
+                atomicAddDouble(&a[aux2 + k], -auxrij);
             }
     }
+    atomicAddDouble(&a[aux1 ], sumRIJ[0]);
+    atomicAddDouble(&a[aux1 + 1 ], sumRIJ[1]);
+    atomicAddDouble(&a[aux1 + 2], sumRIJ[2]);
 
+   
+   //ISTO NAO FUNCIONA -> ERROS DE ARREDONDAMENTO
     __syncthreads();
     // Perform parallel reduction using an inverted tree
 
-    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
-        if (tid < s && tid + s < blockDim.x) {
+    for (unsigned int s = NUM_THREADS_PER_BLOCK / 2; s > 0; s >>= 1) {
+        if (tid < s ) {
             temp[tid] += temp[tid + s];
         }
         __syncthreads();
     }
+   
     // Store the result in the output array
     if (tid == 0) {
-        Pot[bid] = temp[0];
+        Pot[bid]=temp[tid];
+        //for(int k=0; k<50;k++){
+        //    Pot[bid] += temp[k];
+        //}
     }
 
 }
@@ -514,25 +544,28 @@ void computeAccelerations_Potencial() {
 //    cudaEvent_t start, stop;
 //    float elapsedTime;
 
-    double *d_r, *d_a, *d_Pot,*aux;
+    double *d_r, *d_a, *d_Pot;
     int i;
     checkCUDAError("init");
 
+
     cudaMalloc((void**)&d_r, sizeof(double) * N * 3);
     cudaMalloc((void**)&d_a, sizeof(double) * N * 3);
-    cudaMalloc((void**)&d_Pot, sizeof(double) * 100);
+    cudaMalloc((void**)&d_Pot, sizeof(double)*NUM_BLOCKS );
+    
     checkCUDAError("mem allocations");
-
+    //printf("%f\n",r[0]);
     cudaMemcpy(d_r, r, sizeof(double) * N * 3, cudaMemcpyHostToDevice);
     cudaMemset(d_a, 0, sizeof(double) * N * 3);
-    //cudaMemset(d_Pot, 0, sizeof(double) * 100); //não é necessário pq ele já põe a zero
+    //cudaMemset(d_Pot, 0, sizeof(double)*100); //não é necessário pq ele já põe a zero
     //cudaMemset(aux, 0, sizeof(double) * N * N * 3);
     checkCUDAError("set memory");
 
    // cudaEventCreate(&start);
    // cudaEventCreate(&stop);
    // cudaEventRecord(start, 0);
-    calculateForces<<<NUM_THREADS_PER_BLOCK, NUM_BLOCKS>>>(d_r, d_a, d_Pot);
+
+    calculateForces<<<NUM_BLOCKS,NUM_THREADS_PER_BLOCK>>>(d_r, d_a, d_Pot);
 
     checkCUDAError("FORCRES");
    // cudaEventRecord(stop, 0);
@@ -543,7 +576,7 @@ void computeAccelerations_Potencial() {
     cudaMemcpy(a, d_a, sizeof(double) * N * 3, cudaMemcpyDeviceToHost);
     checkCUDAError("memCPOY1");
 
-    cudaMemcpy(RESULTS, d_Pot, sizeof(double) *100, cudaMemcpyDeviceToHost);
+    cudaMemcpy(RESULTS, d_Pot, sizeof(double)*NUM_BLOCKS, cudaMemcpyDeviceToHost);
     checkCUDAError("memCPOY2");
 
 
@@ -556,24 +589,13 @@ void computeAccelerations_Potencial() {
 
 
 
-    //calcular o PE
     PE = 0.;
-    for(i=0;i<100;i++){
+    //calcular o PE
+    
+    for(i=0;i<NUM_BLOCKS;i++){
         PE+=RESULTS[i];
     }
-
-
-    // //calcular o d_a
-    // int aux1,j;
-    // for (j = 1; j < N; j++) {   // loop over all distinct pairs i,j
-    //     aux1= j*N*3;
-    //     for (i = 0; i < N; i++) {
-    //         a[j*3] -= AUXA[aux1 + i*3];
-    //         a[j*3 +1] -= AUXA[aux1 + i*3 +1];
-    //         a[j*3 +2] -= AUXA[aux1 + i*3 +2];
-
-    //     }
-    // }
+    
 
      //since we know we are working with 
     //since all the results are multiplied by 4 in the start, we just multiply the final result by 4
@@ -591,6 +613,7 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
     double psum = 0.;
 
     double aux;
+   // printf("%f\n",r[0]);
     
     //  Compute accelerations from forces at current position
     // this call was removed (commented) for predagogical reasons
